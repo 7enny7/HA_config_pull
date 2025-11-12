@@ -1,7 +1,6 @@
 blueprint:
   name: Frigate Notifications Custom
   author: SgtBatten
-  moder: 7enny7
   homeassistant:
     min_version: 2024.11.0
   description: |
