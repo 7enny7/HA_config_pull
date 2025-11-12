@@ -98,6 +98,7 @@ blueprint:
             device:
               filter:
                 integration: telegram_bot
+          default: ""
         telegram_base_url:
           name: Telegram Base URL (Optional)
           description: |
@@ -1004,6 +1005,7 @@ variables:
   android_auto: !input android_auto
   notify_group: !input notify_group
   notify_group_target: "{{ notify_group | lower | regex_replace('^notify\\.', '') | replace(' ','_') }}"
+  telegram_entry_id: !input telegram_entry_id
   telegram_chat_id: !input notify_telegram_chat_id
   telegram: "{{true if (telegram_chat_id | length > 0) else false}}"
   zone_only: !input zone_filter
@@ -1238,6 +1240,7 @@ actions:
                               Transparency: {{tv_transparency}}, 
                               TV Interrupt: {{tv_interrupt}}, 
                             Telegram: {{telegram}},
+                            Config_entry_id: "{{telegram_entry_id}}"
                             Telegram_chat_id: {{telegram_chat_id}},
                           Filters: 
                             Severity:
@@ -1301,6 +1304,7 @@ actions:
                             sequence:
                               - action: telegram_bot.send_photo
                                 data:
+                                  config_entry_id: "{{telegram_entry_id}}"
                                   target: "{{telegram_chat_id}}"
                                   caption: "{{message}}"
                                   url: "{{attachment|replace( base_url, telegram_base_url )}}"
@@ -1773,6 +1777,7 @@ actions:
                                       default:
                                         - action: telegram_bot.send_photo
                                           data:
+                                            config_entry_id: "{{telegram_entry_id}}"
                                             target: "{{telegram_chat_id}}"
                                             caption: "{{message}}"
                                             url: "{{attachment | replace(base_url,telegram_base_url)}}"
