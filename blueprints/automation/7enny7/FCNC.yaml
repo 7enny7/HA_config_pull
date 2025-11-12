@@ -89,13 +89,13 @@ blueprint:
       icon: mdi:phone-outline
       collapsed: true
       input:
-        telegram_entry_id:
+        telegram_device_id:
           name: Telegram bot name (Optional)
           description: |
             The config entry representing name of selected Telegram bot to send the messages.
                 default: false
           selector:
-            entity:
+            device:
               filter:
                 integration: telegram_bot
           default: ""
@@ -1005,7 +1005,8 @@ variables:
   android_auto: !input android_auto
   notify_group: !input notify_group
   notify_group_target: "{{ notify_group | lower | regex_replace('^notify\\.', '') | replace(' ','_') }}"
-  telegram_entry_id: !input telegram_entry_id
+  telegram_device_id: !input telegram_device_id
+  telegram_entry_id: "{{ device_entities(telegram_device_id)[0] }}"
   telegram_chat_id: !input notify_telegram_chat_id
   telegram: "{{true if (telegram_chat_id | length > 0) else false}}"
   zone_only: !input zone_filter
