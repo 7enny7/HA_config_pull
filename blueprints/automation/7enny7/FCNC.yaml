@@ -93,6 +93,11 @@ blueprint:
           name: Telegram bot name (Optional)
           description: |
             The config entry representing name of selected Telegram bot to send the messages.
+                default: false
+          selector:
+            device:
+              filter:
+                integration: telegram_bot
         telegram_base_url:
           name: Telegram Base URL (Optional)
           description: |
