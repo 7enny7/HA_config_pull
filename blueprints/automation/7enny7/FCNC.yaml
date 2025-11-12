@@ -51,7 +51,7 @@ blueprint:
       description: Select a device that runs the official Home Assistant app to receive notifications. If you wish to notify a group of devices and/or Android/Fire TV use the field below to override this selection. This will be ignored in that case but is still required.
       default: false
       selector:
-        device:
+        entity:
           filter:
             integration: mobile_app
     notify_group:
@@ -95,7 +95,7 @@ blueprint:
             The config entry representing name of selected Telegram bot to send the messages.
                 default: false
           selector:
-            device:
+            entity:
               filter:
                 integration: telegram_bot
           default: ""
