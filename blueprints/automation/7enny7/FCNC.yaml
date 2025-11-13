@@ -1006,7 +1006,7 @@ variables:
   notify_group: !input notify_group
   notify_group_target: "{{ notify_group | lower | regex_replace('^notify\\.', '') | replace(' ','_') }}"
   telegram_device_id: !input telegram_device_id
-  telegram_entry_id: "{{ device_entities(telegram_device_id)[0] }}"
+  telegram_entry_id: "{{ state_attr(device_entities(telegram_device_id)[0], 'bot').config_entry_id }}"
   telegram_chat_id: !input notify_telegram_chat_id
   telegram: "{{true if (telegram_chat_id | length > 0) else false}}"
   zone_only: !input zone_filter
