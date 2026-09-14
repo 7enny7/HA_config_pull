@@ -1,20 +1,20 @@
 blueprint:
   name: Frigate Notifications Custom
-  author: SgtBatten
+  author: 7enny remix on SgtBatten
   homeassistant:
-    min_version: 2024.11.0
+    min_version: 2026.01.0
   description: |
     ## Frigate Notifications
 
     A highly customisable Notification template for Frigate Camera Notifications.
 
     ### Software Version Requirements
-      - Minimum Home Assistant Version: 2024.11
-      - Minimum Frigate Version: 0.14.0
-      - Minimum Frigate Integration Version: 5.7.0
+      - Minimum Home Assistant Version: 2026.9.2
+      - Minimum Frigate Version: 0.18.0
+      - Minimum Frigate Integration Version: 5.15.6
         - **Note:** "Enable the unauthenticated notification event proxy" must be ticked during setup
       - An MQTT broker connected to Home Assistant and Frigate.
-      - Minimum iOS Version: 15.0
+      - Minimum iOS Version: 27.0
 
 
     ### Required Configuration Options:
