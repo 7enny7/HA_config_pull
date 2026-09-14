@@ -16,6 +16,7 @@ blueprint:
       - An MQTT broker connected to Home Assistant and Frigate.
       - Minimum iOS Version: 15.0
 
+
     ### Required Configuration Options:
       - Frigate Cameras
       - Mobile Device (Running HA Companion App)
@@ -85,7 +86,9 @@ blueprint:
     telegram:
       name: |
         # Telegram Configuration
-      description: These are Telegram specific Options.
+      description: >-
+        Telegram Bot options. Uses the current Telegram Bot action schema with
+        config_entry_id + chat_id (the legacy Telegram target parameter was removed).
       icon: mdi:phone-outline
       collapsed: true
       input:
@@ -982,7 +985,7 @@ triggers:
   - trigger: event
     event_type: telegram_callback
     event_data:
-      action: "custom-{{ this.entity_id}}"
+      data: "custom-{{ this.entity_id }}"
     id: custom
 variables:
   input_camera: !input camera
@@ -1006,9 +1009,15 @@ variables:
   notify_group: !input notify_group
   notify_group_target: "{{ notify_group | lower | regex_replace('^notify\\.', '') | replace(' ','_') }}"
   telegram_device_id: !input telegram_device_id
-  telegram_entry_id: "{{ state_attr(device_entities(telegram_device_id)[0], 'bot').config_entry_id }}"
+  telegram_entry_id: >-
+    {% if telegram_device_id %}
+      {% set telegram_entities = device_entities(telegram_device_id) %}
+      {{ config_entry_id(telegram_entities[0]) if telegram_entities | length > 0 else '' }}
+    {% else %}
+      {{ '' }}
+    {% endif %}
   telegram_chat_id: !input notify_telegram_chat_id
-  telegram: "{{true if (telegram_chat_id | length > 0) else false}}"
+  telegram: "{{ telegram_chat_id | string | length > 0 }}"
   zone_only: !input zone_filter
   input_zones: !input zones
   zones: "{{ input_zones | list | lower }}"
@@ -1306,7 +1315,7 @@ actions:
                               - action: telegram_bot.send_photo
                                 data:
                                   config_entry_id: "{{telegram_entry_id}}"
-                                  target: "{{telegram_chat_id}}"
+                                  chat_id: "{{ telegram_chat_id | int }}"
                                   caption: "{{message}}"
                                   url: "{{attachment|replace( base_url, telegram_base_url )}}"
                           - conditions: "{{ not notify_group_target }}"
@@ -1755,7 +1764,7 @@ actions:
                                             - action: telegram_bot.send_video
                                               data:
                                                 config_entry_id: "{{telegram_entry_id}}"
-                                                target: "{{telegram_chat_id}}"
+                                                chat_id: "{{ telegram_chat_id | int }}"
                                                 caption: "{{message}}"
                                                 url: "{{ video | replace(base_url, telegram_base_url) }}"
                                                 inline_keyboard:
@@ -1779,7 +1788,7 @@ actions:
                                         - action: telegram_bot.send_photo
                                           data:
                                             config_entry_id: "{{telegram_entry_id}}"
-                                            target: "{{telegram_chat_id}}"
+                                            chat_id: "{{ telegram_chat_id | int }}"
                                             caption: "{{message}}"
                                             url: "{{attachment | replace(base_url,telegram_base_url)}}"
                                             inline_keyboard:
