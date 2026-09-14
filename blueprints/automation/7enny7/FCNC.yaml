@@ -19,7 +19,7 @@ blueprint:
 
     ### Required Configuration Options:
       - Frigate Cameras
-      - Mobile Device (Running HA Companion App)
+      - A notification destination: mobile device, notification group, or Telegram chat.
 
     ### Features:
       - Easily select the camera entities or mobile device using a drop-down menu.
@@ -95,8 +95,7 @@ blueprint:
         telegram_device_id:
           name: Telegram bot name (Optional)
           description: |
-            The config entry representing name of selected Telegram bot to send the messages.
-                default: false
+            Select the Telegram bot device when using Telegram notifications.
           selector:
             device:
               filter:
@@ -118,6 +117,19 @@ blueprint:
             If set, this will override individual devices and groups above. Note: TV (far below) must be set to false.
             Base URL must start with https since telegram URL buttons only work with https.
           default: ""
+        telegram_snapshot_pair:
+          name: Full-frame snapshot followed by close-up
+          description: |
+            Send two consecutive photos: the full frame with a detection bounding box,
+            then a cropped close-up without the box. The close-up is sent silently.
+            Overrides Attachment and Updated Attachment for Telegram photos only.
+            Applies to initial notifications and photo updates; final videos still take priority.
+            Both images use the first tracked object in the review, not every object.
+            Enable snapshots in Frigate. Older Frigate versions may ignore crop/bbox
+            overrides for completed events and return the saved snapshot twice.
+          default: false
+          selector:
+            boolean:
     notification_customisations:
       name: |
         # Notification Customisations
@@ -464,6 +476,41 @@ blueprint:
                 - label: Detections
                   value: detection
               multiple: true
+        detection_window_start:
+          name: Detections - notification window start
+          description: |
+            Daily notification window in Home Assistant's local time zone.
+            Start is inclusive; end is exclusive. A start later than the end crosses
+            midnight. Equal start and end means all day. Applies to all notification
+            destinations and updates using the review's current severity.
+            Existing Event Type and Time Filter settings still apply.
+          default: "00:00:00"
+          selector:
+            time: {}
+        detection_window_end:
+          name: Detections - notification window end
+          description: Equal to the detection start time means detections are allowed all day.
+          default: "00:00:00"
+          selector:
+            time: {}
+        alert_window_start:
+          name: Alerts - notification window start
+          description: |
+            Independent daily window for alerts, in Home Assistant's local time zone.
+            Start is inclusive; end is exclusive. Overnight windows are supported.
+            Equal start and end means all day. Applies to initial notifications and
+            updates, including reviews promoted from detection to alert.
+            Windows are checked after image/video delays. Suppressed notifications
+            are not queued for delivery when a window opens. Custom actions are unaffected.
+          default: "00:00:00"
+          selector:
+            time: {}
+        alert_window_end:
+          name: Alerts - notification window end
+          description: Equal to the alert start time means alerts are allowed all day.
+          default: "00:00:00"
+          selector:
+            time: {}
         master_condition:
           name: Master Condition (Optional)
           description: Set conditions that will stop the automation from running if the result is false. No other tests will be conducted later. This is a kill switch on initiation.
@@ -1017,6 +1064,7 @@ variables:
       {{ '' }}
     {% endif %}
   telegram_chat_id: !input notify_telegram_chat_id
+  telegram_snapshot_pair: !input telegram_snapshot_pair
   telegram: "{{ telegram_chat_id | string | length > 0 }}"
   zone_only: !input zone_filter
   input_zones: !input zones
@@ -1027,6 +1075,10 @@ variables:
   labels: "{{ input_labels | list | lower }}"
   presence_entity: !input presence_filter
   disable_times: !input disable_times
+  detection_window_start: !input detection_window_start
+  detection_window_end: !input detection_window_end
+  alert_window_start: !input alert_window_start
+  alert_window_end: !input alert_window_end
   cooldown: !input cooldown
   timeout: !input timeout
   loitering: false
@@ -1309,6 +1361,13 @@ actions:
                         sequence: !input "custom_action_auto"
                   - alias: "Send Notification"
                     sequence:
+                      - alias: Notification window for current severity
+                        condition: template
+                        value_template: >-
+                          {% set start = today_at(alert_window_start if severity == 'alert' else detection_window_start).time() %}
+                          {% set end = today_at(alert_window_end if severity == 'alert' else detection_window_end).time() %}
+                          {% set current = now().time() %}
+                          {{ start == end or (start <= current < end if start < end else current >= start or current < end) }}
                       - choose:
                           - conditions: "{{ telegram }}"
                             sequence:
@@ -1317,7 +1376,18 @@ actions:
                                   config_entry_id: "{{telegram_entry_id}}"
                                   chat_id: "{{ telegram_chat_id | int }}"
                                   caption: "{{message}}"
-                                  url: "{{attachment|replace( base_url, telegram_base_url )}}"
+                                  url: "{{ telegram_base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1&crop=0' if telegram_snapshot_pair else (attachment | replace(base_url, telegram_base_url) if base_url else telegram_base_url ~ attachment if attachment.startswith('/') else attachment) }}"
+                              - if: "{{ telegram_snapshot_pair }}"
+                                then:
+                                  - action: telegram_bot.send_photo
+                                    continue_on_error: true
+                                    data:
+                                      config_entry_id: "{{telegram_entry_id}}"
+                                      chat_id: "{{ telegram_chat_id | int }}"
+                                      caption: "Close-up: {{ camera_name }}"
+                                      parse_mode: plain_text
+                                      disable_notification: true
+                                      url: "{{telegram_base_url}}/api/frigate{{client_id}}/notifications/{{id}}/snapshot.jpg?bbox=0&crop=1"
                           - conditions: "{{ not notify_group_target }}"
                             sequence:
                               - device_id: !input notify_device
@@ -1753,6 +1823,13 @@ actions:
                                     seconds: "{{final_delay}}"
                         - alias: "Update Notification"
                           sequence:
+                            - alias: Notification window for current severity
+                              condition: template
+                              value_template: >-
+                                {% set start = today_at(alert_window_start if severity == 'alert' else detection_window_start).time() %}
+                                {% set end = today_at(alert_window_end if severity == 'alert' else detection_window_end).time() %}
+                                {% set current = now().time() %}
+                                {{ start == end or (start <= current < end if start < end else current >= start or current < end) }}
                             - choose:
                                 - conditions: "{{ telegram }}"
                                   sequence:
@@ -1790,13 +1867,24 @@ actions:
                                             config_entry_id: "{{telegram_entry_id}}"
                                             chat_id: "{{ telegram_chat_id | int }}"
                                             caption: "{{message}}"
-                                            url: "{{attachment | replace(base_url,telegram_base_url)}}"
+                                            url: "{{ telegram_base_url ~ '/api/frigate' ~ client_id ~ '/notifications/' ~ id ~ '/snapshot.jpg?bbox=1&crop=0' if telegram_snapshot_pair else (attachment | replace(base_url, telegram_base_url) if base_url else telegram_base_url ~ attachment if attachment.startswith('/') else attachment) }}"
                                             inline_keyboard:
                                               - [
                                                   ["{{button_1}}", "{{url_1}}"],
                                                   ["{{button_2}}", "{{url_2}}"],
                                                 ]
                                               - [["{{button_3}}", "{{url_3}}"]]
+                                        - if: "{{ telegram_snapshot_pair }}"
+                                          then:
+                                            - action: telegram_bot.send_photo
+                                              continue_on_error: true
+                                              data:
+                                                config_entry_id: "{{telegram_entry_id}}"
+                                                chat_id: "{{ telegram_chat_id | int }}"
+                                                caption: "Close-up: {{ camera_name }}"
+                                                parse_mode: plain_text
+                                                disable_notification: true
+                                                url: "{{telegram_base_url}}/api/frigate{{client_id}}/notifications/{{id}}/snapshot.jpg?bbox=0&crop=1"
                                 - conditions: "{{ not notify_group_target }}"
                                   sequence:
                                     - device_id: !input notify_device
