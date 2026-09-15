@@ -1,0 +1,307 @@
+blueprint:
+  name: Home Assistant Frigate Telegram Notifications
+  author: 7enny7
+  domain: automation
+  homeassistant:
+    min_version: 2026.9.0
+  description: |
+    Telegram-only notifications for Frigate 0.18 review messages.
+    Requires MQTT, the Frigate integration notification event proxy, and a
+    configured Telegram bot with an allowed chat (select its notify entity below).
+    Enable Frigate snapshots; enable recordings if sending final clips.
+
+    Listens to frigate/reviews, including updates that promote a detection to an
+    alert. Event Type filters after.severity, NOT the MQTT message type.
+    Each MQTT message is evaluated independently; there is no waiting loop or
+    cross-camera cooldown. New reviews and severity promotions always qualify.
+    Other updates and final messages are configurable. MQTT redeliveries are not
+    deduplicated. A restart does not replay previously missed messages.
+
+    Separate detection/alert windows use Home Assistant local time. Equal start
+    and end means all day; overnight windows work. Times are checked at delivery,
+    after any delay. Suppressed messages are not replayed when a window opens.
+
+  input:
+    camera:
+      name: Frigate cameras
+      selector:
+        entity:
+          filter:
+            integration: frigate
+            domain: camera
+          multiple: true
+    telegram_target:
+      name: Telegram destination
+      description: Select the Telegram notify entity for your allowed chat. It identifies both bot and chat.
+      selector:
+        entity:
+          filter:
+            integration: telegram_bot
+            domain: notify
+    base_url:
+      name: Home Assistant media URL
+      description: |
+        Home Assistant URL reachable from Home Assistant itself, including http://
+        or https:// (for example http://192.168.1.25:8123). Media is downloaded by
+        HA and uploaded to Telegram. Enable the Frigate integration's
+        unauthenticated notification event proxy. Do not enter the Frigate server URL.
+      selector:
+        text: {}
+    client_id:
+      name: Frigate instance client ID
+      description: Optional Frigate integration instance identifier for notification URLs.
+      default: ""
+      selector:
+        text: {}
+    mqtt_topic:
+      name: MQTT review topic
+      description: Use your Frigate topic prefix followed by /reviews, not /events or /review_status.
+      default: frigate/reviews
+    review_severity:
+      name: Event Type
+      default: [alert, detection]
+      selector:
+        select:
+          options:
+            - label: Alerts
+              value: alert
+            - label: Detections
+              value: detection
+          multiple: true
+    notify_updates:
+      name: Send other review updates
+      description: |
+        Notify on updates such as added objects, zones, and recognized names.
+        Severity changes still notify when this is off. Turning this on may send
+        several messages per review, but allows later updates to pass newly met filters.
+      default: true
+      selector:
+        boolean: {}
+    final_update:
+      name: Send final notification
+      default: true
+      selector:
+        boolean: {}
+    send_clip:
+      name: Send clip with final notification
+      description: |
+        Send the first tracked object's clip on end messages. Requires recordings.
+        Falls back to snapshots if the clip action fails. This is an object clip,
+        not necessarily the entire review. Final notification must be enabled.
+      default: false
+      selector:
+        boolean: {}
+    telegram_snapshot_pair:
+      name: Full-frame snapshot followed by close-up
+      description: |
+        Full frame with bounding box, then a silent cropped image without the box.
+        Both requests use one tracked object; its best frame can change between
+        requests. Reviews without object IDs (for example audio-only) send text.
+      default: true
+      selector:
+        boolean: {}
+    initial_delay:
+      name: Snapshot delay
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: seconds
+          mode: box
+    final_delay:
+      name: Final media delay
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: seconds
+          mode: box
+    message:
+      name: Message
+      description: "Template variables: camera_name, severity, label, review_id, event, type. Sent as plain text; media captions are limited to 1024 characters."
+      default: "{{ severity | title }}: {{ label }} on {{ camera_name }}{{ ' (ended)' if type == 'end' else '' }}."
+      selector:
+        text:
+          multiline: true
+    detection_window_start:
+      name: Detections - notification window start
+      description: Start inclusive, end exclusive; equal times allow all day.
+      default: "00:00:00"
+      selector:
+        time: {}
+    detection_window_end:
+      name: Detections - notification window end
+      default: "00:00:00"
+      selector:
+        time: {}
+    alert_window_start:
+      name: Alerts - notification window start
+      description: Independent of detections. A start later than the end crosses midnight.
+      default: "00:00:00"
+      selector:
+        time: {}
+    alert_window_end:
+      name: Alerts - notification window end
+      default: "00:00:00"
+      selector:
+        time: {}
+    labels:
+      name: Required object labels
+      description: Any matching label passes. Empty allows all, including audio-only reviews. Uses review-level labels, not an object-to-image mapping.
+      default: []
+      selector:
+        select:
+          options: [person, car, dog, cat, package]
+          multiple: true
+          custom_value: true
+    zones:
+      name: Required zones
+      description: Any matching review zone passes. Empty allows all zones.
+      default: []
+      selector:
+        select:
+          options: []
+          multiple: true
+          custom_value: true
+    presence_filter:
+      name: Suppress when anyone is home
+      default: []
+      selector:
+        entity:
+          filter:
+            domain: [person, device_tracker, group]
+          multiple: true
+    master_condition:
+      name: Additional conditions
+      default: []
+      selector:
+        condition: {}
+
+# Queue independent review messages so an update cannot cancel a photo pair.
+# No payload='new' filter: alert promotions arrive with type='update'.
+mode: queued
+max: 50
+trigger_variables:
+  mqtt_topic: !input mqtt_topic
+triggers:
+  - trigger: mqtt
+    topic: "{{ mqtt_topic }}"
+variables:
+  input_camera: !input camera
+  input_severity: !input review_severity
+  notify_updates: !input notify_updates
+  final_update: !input final_update
+  send_clip: !input send_clip
+  telegram_snapshot_pair: !input telegram_snapshot_pair
+  initial_delay: !input initial_delay
+  final_delay: !input final_delay
+  input_base_url: !input base_url
+  base_url: "{{ input_base_url | trim | trim('/') }}"
+  input_client_id: !input client_id
+  client_id: "{{ '/' ~ (input_client_id | trim('/')) if input_client_id else '' }}"
+  input_labels: !input labels
+  input_zones: !input zones
+  presence_filter: !input presence_filter
+  detection_window_start: !input detection_window_start
+  detection_window_end: !input detection_window_end
+  alert_window_start: !input alert_window_start
+  alert_window_end: !input alert_window_end
+  # Non-JSON, null, and unexpected payloads fail closed before field access.
+  payload: "{{ trigger.payload | from_json({}) }}"
+  event: "{{ payload if payload is mapping else {} }}"
+  after: "{{ event.get('after') if event.get('after') is mapping else {} }}"
+  before: "{{ event.get('before') if event.get('before') is mapping else {} }}"
+  review_data: "{{ after.get('data') if after.get('data') is mapping else {} }}"
+  type: "{{ event.get('type', '') }}"
+  severity: "{{ after.get('severity', '') }}"
+  camera: "{{ after.get('camera', '') }}"
+  camera_name: "{{ camera | replace('_', ' ') | title }}"
+  review_id: "{{ after.get('id', '') }}"
+  objects: "{{ (review_data.get('objects') or []) | select('string') | list }}"
+  detections: "{{ (review_data.get('detections') or []) | select('string') | reject('equalto', '') | sort | list }}"
+  id: "{{ detections[0] if detections else '' }}"
+  label: >-
+    {% set names = (review_data.get('sub_labels') or []) | select('string') | list %}
+    {% set audio = (review_data.get('audio') or []) | select('string') | list %}
+    {{ (objects + names + audio) | unique | join(', ') or 'Activity' }}
+conditions:
+  - alias: Valid review lifecycle and exact severity
+    condition: template
+    value_template: "{{ type in ['new', 'update', 'end'] and review_id is string and review_id | length > 0 and severity in ['alert', 'detection'] and severity in input_severity }}"
+  - alias: Selected Frigate camera
+    condition: template
+    value_template: "{{ camera in (expand(input_camera) | map(attribute='attributes.camera_name', default='') | list) }}"
+  - alias: Requested lifecycle messages including promotions
+    condition: template
+    value_template: >-
+      {{ type == 'new'
+         or (type == 'update' and (notify_updates or before.get('severity') != severity))
+         or (type == 'end' and final_update) }}
+actions:
+  - delay:
+      seconds: "{{ final_delay if type == 'end' else initial_delay }}"
+  - alias: Current notification window
+    condition: template
+    value_template: >-
+      {% set start = today_at(alert_window_start if severity == 'alert' else detection_window_start).time() %}
+      {% set end = today_at(alert_window_end if severity == 'alert' else detection_window_end).time() %}
+      {% set current = now().time() %}
+      {{ start == end or (start <= current < end if start < end else current >= start or current < end) }}
+  - alias: Required objects
+    condition: template
+    value_template: >-
+      {% set normalized = objects | map('replace', '-verified', '') | list %}
+      {{ not input_labels or normalized | select('in', input_labels) | list | length > 0 }}
+  - alias: Required zones
+    condition: template
+    value_template: "{{ not input_zones or (review_data.get('zones') or []) | select('in', input_zones) | list | length > 0 }}"
+  - alias: Nobody home
+    condition: template
+    value_template: "{{ expand(presence_filter) | selectattr('state', 'eq', 'home') | list | length == 0 }}"
+  - alias: Additional conditions
+    condition: !input master_condition
+  - variables:
+      message: !input message
+      snapshot_url: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/snapshot.jpg"
+      clip_url: "{{ base_url }}/api/frigate{{ client_id }}/notifications/{{ id }}/{{ camera }}/clip.mp4"
+      clip_result: {}
+      photo_result: {}
+  - if: "{{ id and type == 'end' and send_clip }}"
+    then:
+      - action: telegram_bot.send_video
+        continue_on_error: true
+        data:
+          entity_id: !input telegram_target
+          url: "{{ clip_url }}"
+          caption: "{{ (message | string)[:1024] }}"
+          parse_mode: plain_text
+        response_variable: clip_result
+  - if: "{{ id and not (clip_result.get('chats', [])) }}"
+    then:
+      - action: telegram_bot.send_photo
+        continue_on_error: true
+        data:
+          entity_id: !input telegram_target
+          url: "{{ snapshot_url }}?bbox=1&crop=0"
+          caption: "{{ (message | string)[:1024] }}"
+          parse_mode: plain_text
+        response_variable: photo_result
+      - if: "{{ telegram_snapshot_pair and photo_result.get('chats', []) }}"
+        then:
+          - action: telegram_bot.send_photo
+            continue_on_error: true
+            data:
+              entity_id: !input telegram_target
+              url: "{{ snapshot_url }}?bbox=0&crop=1"
+              caption: "Close-up: {{ camera_name }}"
+              parse_mode: plain_text
+              disable_notification: true
+  - if: "{{ not clip_result.get('chats', []) and not photo_result.get('chats', []) }}"
+    then:
+      - action: telegram_bot.send_message
+        data:
+          entity_id: !input telegram_target
+          message: "{{ (message | string)[:4000] }}"
+          parse_mode: plain_text
